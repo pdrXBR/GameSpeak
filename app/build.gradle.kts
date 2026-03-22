@@ -56,16 +56,24 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-service:2.7.0")
     implementation("androidx.lifecycle:lifecycle-process:2.7.0")
 
-    // Ktor
+        // Ktor
     val ktorVersion = "2.3.7"
+    
+    // SERVER (essencial para o install e routing funcionar)
     implementation("io.ktor:ktor-server-core:$ktorVersion")
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
     implementation("io.ktor:ktor-server-websockets:$ktorVersion")
+    implementation("io.ktor:ktor-server-host-common:$ktorVersion") // Adicione esta linha!
+    implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion") // Se for usar JSON no servidor
+
+    // CLIENT
     implementation("io.ktor:ktor-client-core:$ktorVersion")
     implementation("io.ktor:ktor-client-cio:$ktorVersion")
     implementation("io.ktor:ktor-client-websockets:$ktorVersion")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
     implementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
+    
+    // COMMON
+    implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")

@@ -43,7 +43,7 @@ class AudioCapture(
 
         recordingJob = scope.launch {
             val buffer = ByteArray(bufferSize)
-            while (isRecording.get() && !isActive.isCancelled) {
+            while (isRecording.get() && isActive) {
                 val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                 if (read > 0) {
                     val audioData = buffer.copyOf(read)

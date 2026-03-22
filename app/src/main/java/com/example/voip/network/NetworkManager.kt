@@ -4,10 +4,13 @@ import android.content.Context
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.websocket.*
+import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.http.*
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.websocket.*
+import io.ktor.server.websocket.webSocket
+import io.ktor.server.routing.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -59,10 +62,10 @@ class NetworkManager private constructor(
 
         // Start WebSocket server on port 8080
         webSocketServer = embeddedServer(Netty, port = 8080) {
-            install(io.ktor.server.websocket.WebSockets)
+            install(WebSockets)
             routing {
-                webSocket("/signal") {
-                    handleWebSocketConnection(this)
+                webSocket("/signal") { session ->
+                    handleWebSocketConnection(session)
                 }
             }
         }.start(wait = false)
@@ -70,7 +73,7 @@ class NetworkManager private constructor(
         // Start UDP receive loop
         receiveJob = scope.launch {
             val buffer = ByteArray(4096)
-            while (isRunning.get() && !isActive.isCancelled) {
+            while (isRunning.get() && isActive) {
                 val packet = DatagramPacket(buffer, buffer.size)
                 try {
                     udpSocket?.receive(packet)
@@ -84,7 +87,6 @@ class NetworkManager private constructor(
                                 udpSocket?.send(DatagramPacket(outPacket, outPacket.size, addr))
                             }
                         }
-                        // Also deliver locally (for server itself? if server wants to hear, but normally server does not have audio)
                         onAudioReceived?.invoke(audioData)
                     }
                 } catch (e: Exception) {
@@ -106,9 +108,9 @@ class NetworkManager private constructor(
         webSocketClient = HttpClient(CIO) {
             install(io.ktor.client.plugins.websocket.WebSockets)
         }
-        clientSession = webSocketClient?.webSocketSession(
-            request = io.ktor.client.request.HttpRequestBuilder().url("ws://$serverIp:8080/signal")
-        )
+        clientSession = webSocketClient?.webSocketSession {
+            url("ws://$serverIp:8080/signal")
+        }
 
         // Send UDP port to server after connection
         clientSession?.send(Frame.Text("$udpPort"))
@@ -124,13 +126,13 @@ class NetworkManager private constructor(
         }
 
         serverUdpPort?.let {
-            serverUdpAddress = InetSocketAddress(serverIp, it)
+            serverUdpAddress = InetSocketAddress(serverIp!!, it)
         } ?: throw Exception("Server did not provide UDP port")
 
         // Start UDP receive loop
         receiveJob = scope.launch {
             val buffer = ByteArray(4096)
-            while (isRunning.get() && !isActive.isCancelled) {
+            while (isRunning.get() && isActive) {
                 val packet = DatagramPacket(buffer, buffer.size)
                 udpSocket?.receive(packet)
                 val data = packet.data.copyOf(packet.length)
@@ -176,11 +178,10 @@ class NetworkManager private constructor(
         scope.cancel()
     }
 
-    private suspend fun handleWebSocketConnection(session: WebSocketSession) {
+    private suspend fun handleWebSocketConnection(session: DefaultWebSocketServerSession) {
         val udpPortMsg = session.receive() as? Frame.Text ?: return
         val clientUdpPort = udpPortMsg.readText().toIntOrNull() ?: return
-
-        val clientIp = session.call.request.origin.remoteAddress.address
+        val clientIp = session.call.request.origin.remoteAddress?.address ?: return
         val clientAddress = InetSocketAddress(clientIp, clientUdpPort)
         val clientId = "client_${System.currentTimeMillis()}"
         clients[clientId] = clientAddress

@@ -45,12 +45,20 @@ android {
         kotlinCompilerExtensionVersion = "1.5.4"
     }
 
-    // --- BLOCO ADICIONADO PARA RESOLVER O ERRO DO GITHUB ACTIONS ---
     lint {
         abortOnError = false
         checkReleaseBuilds = false
     }
-    // ---------------------------------------------------------------
+
+    // --- BLOCO PARA RESOLVER O ERRO DE MERGE JAVA RESOURCE (META-INF) ---
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "META-INF/io.netty.versions.properties"
+        }
+    }
+    // --------------------------------------------------------------------
 }
 
 dependencies {

@@ -14,14 +14,13 @@ import io.ktor.server.plugins.origin
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets as ServerWebSockets
 import io.ktor.server.websocket.webSocket
-import io.ktor.server.websocket.DefaultWebSocketServerSession // IMPORTANTE: Adicione este especificamente
+import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.firstOrNull
 import java.net.DatagramPacket
 import java.net.DatagramSocket
-import java.net.InetAddress // Adicione este para ajudar na ambiguidade
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -64,7 +63,7 @@ class NetworkManager private constructor(
         udpPort = udpSocket?.localPort ?: 0
 
         webSocketServer = embeddedServer(Netty, port = 8080) {
-            install(ServerWebSockets) 
+            install(ServerWebSockets)
             routing {
                 webSocket("/signal") {
                     handleWebSocketConnection(this)
@@ -125,7 +124,7 @@ class NetworkManager private constructor(
                     udpSocket?.receive(packet)
                     val data = packet.data.copyOf(packet.length)
                     
-                    // Nota: Certifique-se que a classe UdpPacket existe no seu projeto
+                    // Supõe-se que UdpPacket retorne um Pair<String?, ByteArray?>
                     val decoded = UdpPacket.decode(data)
                     val senderId = decoded.first
                     val audioData = decoded.second
@@ -181,18 +180,12 @@ class NetworkManager private constructor(
         val frame = session.incoming.receive()
         if (frame !is Frame.Text) return
         val clientUdpPort = frame.readText().toIntOrNull() ?: return
-    
-        // Pegamos o host como String explicitamente
+
+        // Resolve ambiguidade forçando String
         val clientHost: String = session.call.request.origin.remoteHost
-        
-        // Agora o Kotlin sabe que deve usar InetSocketAddress(String, Int)
         val clientAddress = InetSocketAddress(clientHost, clientUdpPort)
         
         val clientId = "client_${System.currentTimeMillis()}"
-        // ... restante do código
-}
-
-        
         clients[clientId] = clientAddress
         onClientConnected(clientId, clientAddress)
 

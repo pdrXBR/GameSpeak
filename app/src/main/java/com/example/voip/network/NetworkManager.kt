@@ -1,21 +1,23 @@
 package com.example.voip.network
 
 import android.content.Context
-import io.ktor.client.*
-import io.ktor.client.engine.cio.*
-import io.ktor.client.plugins.websocket.*
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocketSession
-import io.ktor.http.*
-import io.ktor.server.engine.*
-import io.ktor.server.netty.*
-import io.ktor.server.websocket.*
+import io.ktor.client.request.url
+import io.ktor.http.HttpMethod
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.netty.Netty
+import io.ktor.server.routing.routing
+import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
-import io.ktor.server.routing.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -33,7 +35,7 @@ class NetworkManager private constructor(
     var udpPort: Int = 0
         private set
 
-    private var webSocketServer: ApplicationEngine? = null
+    private var webSocketServer: io.ktor.server.engine.ApplicationEngine? = null
     private var webSocketClient: HttpClient? = null
     private var clientSession: DefaultClientWebSocketSession? = null
 
@@ -64,8 +66,8 @@ class NetworkManager private constructor(
         webSocketServer = embeddedServer(Netty, port = 8080) {
             install(WebSockets)
             routing {
-                webSocket("/signal") { session ->
-                    handleWebSocketConnection(session)
+                webSocket("/signal") {
+                    handleWebSocketConnection(this)
                 }
             }
         }.start(wait = false)
@@ -106,7 +108,7 @@ class NetworkManager private constructor(
 
         // Connect WebSocket to server
         webSocketClient = HttpClient(CIO) {
-            install(io.ktor.client.plugins.websocket.WebSockets)
+            install(WebSockets)
         }
         clientSession = webSocketClient?.webSocketSession {
             url("ws://$serverIp:8080/signal")
@@ -181,17 +183,22 @@ class NetworkManager private constructor(
     private suspend fun handleWebSocketConnection(session: DefaultWebSocketServerSession) {
         val udpPortMsg = session.receive() as? Frame.Text ?: return
         val clientUdpPort = udpPortMsg.readText().toIntOrNull() ?: return
-        val clientIp = session.call.request.origin.remoteAddress?.address ?: return
+
+        // Get client IP address from the WebSocket session
+        val clientAddressObj = session.call.request.origin.remoteAddress ?: return
+        val clientIp = (clientAddressObj as? InetSocketAddress)?.address ?: return
         val clientAddress = InetSocketAddress(clientIp, clientUdpPort)
         val clientId = "client_${System.currentTimeMillis()}"
         clients[clientId] = clientAddress
         onClientConnected(clientId, clientAddress)
 
+        // Send back the server's UDP port so client can send UDP
         session.send(Frame.Text("UDP_PORT:${udpPort}"))
 
         try {
             for (frame in session.incoming) {
                 if (frame is Frame.Close) break
+                // Other signaling could be handled here
             }
         } finally {
             clients.remove(clientId)

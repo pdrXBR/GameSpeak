@@ -55,99 +55,83 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun VoipApp(
-    viewModel: VoipViewModel = viewModel()
-) {
-    val isServerRunning by viewModel.isServerRunning.collectAsState()
-    val connectedClients by viewModel.connectedClients.collectAsState()
-    val audioLevel by viewModel.audioLevel.collectAsState()
-    val microphoneEnabled by viewModel.microphoneEnabled.collectAsState()
-
+fun VoipScreen(networkManager: NetworkManager) {
+    // Estados para guardar o que o usuário digita
+    var ipAddress by remember { mutableStateOf("192.168.0.100") }
+    var statusText by remember { mutableStateOf("Desconectado") }
+    val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val nsdHelper = remember { NsdHelper.getInstance() }
-    var showConnectDialog by remember { mutableStateOf(false) }
-    var discoveredServers by remember { mutableStateOf(listOf<String>()) }
 
-    LaunchedEffect(showConnectDialog) {
-        if (showConnectDialog) {
-            nsdHelper?.discoverServices { services ->
-                discoveredServers = services.mapNotNull { it.host?.hostAddress }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(text = "GameSpeak VoIP", style = MaterialTheme.typography.headlineMedium)
+        
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Campo para digitar o IP
+        OutlinedTextField(
+            value = ipAddress,
+            onValueChange = { ipAddress = it },
+            label = { Text("IP do Servidor") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Botões de Ação
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            Button(onClick = {
+                statusText = "Iniciando Servidor..."
+                networkManager.startServer()
+                statusText = "Servidor Rodando na porta ${networkManager.udpPort}"
+            }) {
+                Text("Criar Sala (Host)")
             }
-        }
-    }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Voice Chat") },
-                colors = TopAppBarDefaults.mediumTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            )
-        }
-    ) { paddingValues ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primaryContainer,
-                            MaterialTheme.colorScheme.surface
-                        )
-                    )
-                )
-        ) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                AudioLevelIndicator(level = audioLevel, modifier = Modifier.size(100.dp))
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                UserList(users = connectedClients, modifier = Modifier.weight(1f))
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.padding(16.dp)
-                ) {
-                    if (isServerRunning) {
-                        Button(onClick = { viewModel.stopServer() }) {
-                            Text("Stop Server")
+            Button(onClick = {
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        statusText = "Conectando..."
+                        networkManager.connectToServer() // Usa o ipAddress que você digitou
+                        statusText = "Conectado ao Servidor!"
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            statusText = "Erro: ${e.localizedMessage}"
+                            Toast.makeText(context, "Falha na conexão", Toast.LENGTH_SHORT).show()
                         }
-                    } else {
-                        Button(onClick = { viewModel.startServer() }) {
-                            Text("Start Server")
-                        }
-                    }
-
-                    Button(onClick = { showConnectDialog = true }) {
-                        Text("Connect")
-                    }
-
-                    IconButton(onClick = { viewModel.toggleMicrophone() }) {
-                        Icon(
-                            if (microphoneEnabled) Icons.Default.Mic else Icons.Default.MicOff,
-                            contentDescription = if (microphoneEnabled) "Mic on" else "Mic off"
-                        )
                     }
                 }
+            }) {
+                Text("Entrar")
             }
         }
-    }
 
-    if (showConnectDialog) {
-        ConnectDialog(
-            onDismiss = { showConnectDialog = false },
-            onConnect = { ip ->
-                viewModel.connectToServer(ip)
-                showConnectDialog = false
-            },
-            discoveredServers = discoveredServers
-        )
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Status e Logs
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Text(
+                text = "Status: $statusText",
+                modifier = Modifier.padding(16.dp),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Button(
+            onClick = { networkManager.stop(); statusText = "Parado" },
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+        ) {
+            Text("Parar Tudo", color = Color.White)
+        }
     }
 }

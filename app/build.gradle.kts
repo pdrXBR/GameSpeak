@@ -77,13 +77,6 @@ dependencies {
 
     // Ktor
     val ktorVersion = "2.3.7"
-    
-    // SERVER
-    implementation("io.ktor:ktor-server-core:$ktorVersion")
-    implementation("io.ktor:ktor-server-netty:$ktorVersion")
-    implementation("io.ktor:ktor-server-websockets:$ktorVersion")
-    implementation("io.ktor:ktor-server-host-common:$ktorVersion")
-    implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
 
     // CLIENT
     implementation("io.ktor:ktor-client-core:$ktorVersion")

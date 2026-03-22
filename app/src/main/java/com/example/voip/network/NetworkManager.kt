@@ -14,12 +14,14 @@ import io.ktor.server.plugins.origin
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets as ServerWebSockets
 import io.ktor.server.websocket.webSocket
+import io.ktor.server.websocket.DefaultWebSocketServerSession // IMPORTANTE: Adicione este especificamente
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.firstOrNull
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.InetAddress // Adicione este para ajudar na ambiguidade
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -179,12 +181,17 @@ class NetworkManager private constructor(
         val frame = session.incoming.receive()
         if (frame !is Frame.Text) return
         val clientUdpPort = frame.readText().toIntOrNull() ?: return
-
-        val remoteAddress = session.call.request.origin.remoteAddress
-        val clientIp = (session.call.request.origin.remoteHost)
+    
+        // Pegamos o host como String explicitamente
+        val clientHost: String = session.call.request.origin.remoteHost
         
-        val clientAddress = InetSocketAddress(clientIp, clientUdpPort)
+        // Agora o Kotlin sabe que deve usar InetSocketAddress(String, Int)
+        val clientAddress = InetSocketAddress(clientHost, clientUdpPort)
+        
         val clientId = "client_${System.currentTimeMillis()}"
+        // ... restante do código
+}
+
         
         clients[clientId] = clientAddress
         onClientConnected(clientId, clientAddress)

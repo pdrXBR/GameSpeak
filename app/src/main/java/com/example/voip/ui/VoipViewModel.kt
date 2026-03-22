@@ -8,17 +8,14 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.voip.service.ClientInfo
 import com.example.voip.service.VoipService
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 class VoipViewModel(application: Application) : AndroidViewModel(application) {
-    private val _isServerRunning = MutableStateFlow(false)
-    val isServerRunning: StateFlow<Boolean> = _isServerRunning.asStateFlow()
-
-    private val _connectedClients = MutableStateFlow<List<ClientInfo>>(emptyList())
-    val connectedClients: StateFlow<List<ClientInfo>> = _connectedClients.asStateFlow()
+    
+    private val _isConnected = MutableStateFlow(false)
+    val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
     private val _audioLevel = MutableStateFlow(0f)
     val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
@@ -26,75 +23,64 @@ class VoipViewModel(application: Application) : AndroidViewModel(application) {
     private val _microphoneEnabled = MutableStateFlow(true)
     val microphoneEnabled: StateFlow<Boolean> = _microphoneEnabled.asStateFlow()
 
-    private var service: VoipService? = null
-    private var bound = false
+    private var voipService: VoipService? = null
+    private var isBound = false
 
-    private val connection = object : ServiceConnection {
+    private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            service = (binder as VoipService.LocalBinder).getService()
-            bound = true
+            val localBinder = binder as VoipService.LocalBinder
+            voipService = localBinder.getService()
+            isBound = true
+
+            // Observa os fluxos do Service e atualiza a UI
             viewModelScope.launch {
-                service?.isServerRunning?.collect { _isServerRunning.value = it }
+                voipService?.isConnected?.collect { _isConnected.value = it }
             }
             viewModelScope.launch {
-                service?.connectedClients?.collect { _connectedClients.value = it }
+                voipService?.audioLevel?.collect { _audioLevel.value = it }
             }
             viewModelScope.launch {
-                service?.audioLevel?.collect { _audioLevel.value = it }
-            }
-            viewModelScope.launch {
-                service?.microphoneMuted?.collect { muted ->
+                voipService?.microphoneMuted?.collect { muted ->
                     _microphoneEnabled.value = !muted
                 }
             }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
-            bound = false
-            service = null
+            voipService = null
+            isBound = false
+            _isConnected.value = false
         }
     }
 
-    fun startServer() {
+    fun joinRoom(ip: String, roomId: String) {
         val intent = Intent(getApplication(), VoipService::class.java).apply {
-            putExtra("MODE", "SERVER")
+            putExtra("SERVER_IP", ip)
+            putExtra("ROOM_ID", roomId)
         }
         getApplication<Application>().startForegroundService(intent)
-        getApplication<Application>().bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
-    fun stopServer() {
+    fun leaveRoom() {
         val intent = Intent(getApplication(), VoipService::class.java)
         getApplication<Application>().stopService(intent)
-        if (bound) {
-            getApplication<Application>().unbindService(connection)
-            bound = false
+        if (isBound) {
+            getApplication<Application>().unbindService(serviceConnection)
+            isBound = false
         }
-        service = null
-    }
-
-    fun connectToServer(ip: String) {
-        val intent = Intent(getApplication(), VoipService::class.java).apply {
-            putExtra("MODE", "CLIENT")
-            putExtra("SERVER_IP", ip)
-        }
-        getApplication<Application>().startForegroundService(intent)
-        getApplication<Application>().bindService(intent, connection, Context.BIND_AUTO_CREATE)
-    }
-
-    fun disconnect() {
-        stopServer()
+        voipService = null
+        _isConnected.value = false
     }
 
     fun toggleMicrophone() {
-        service?.toggleMicrophone()
-        _microphoneEnabled.value = !_microphoneEnabled.value
+        voipService?.toggleMicrophone()
     }
 
     override fun onCleared() {
         super.onCleared()
-        if (bound) {
-            getApplication<Application>().unbindService(connection)
+        if (isBound) {
+            getApplication<Application>().unbindService(serviceConnection)
         }
     }
 }

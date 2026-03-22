@@ -1,31 +1,37 @@
 package com.example.voip.ui.components
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.example.voip.service.ClientInfo
 
 @Composable
-fun UserList(users: List<ClientInfo>, modifier: Modifier = Modifier) {
-    LazyColumn(modifier = modifier) {
-        items(users) { user ->
-            UserItem(user)
-        }
-    }
-}
-
-@Composable
-fun UserItem(user: ClientInfo) {
-    Row(
-        modifier = Modifier
+fun UserList(modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier
             .fillMaxWidth()
-            .padding(8.dp)
+            .padding(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
     ) {
-        Text(text = user.name, style = MaterialTheme.typography.bodyLarge)
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = "Canal de Voz Ativo",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Você está conectado via Relay. O áudio está sendo transmitido para todos na mesma sala.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
     }
 }

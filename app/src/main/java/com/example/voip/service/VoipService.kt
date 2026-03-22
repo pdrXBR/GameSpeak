@@ -1,13 +1,10 @@
 package com.example.voip.service
 
-import android.os.Binder
 import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.net.wifi.WifiManager
-import android.os.Build
-import android.os.IBinder
-import android.os.PowerManager
+import android.os.*
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
@@ -16,13 +13,10 @@ import com.example.voip.audio.AudioCapture
 import com.example.voip.audio.AudioPlayback
 import com.example.voip.network.NetworkManager
 import com.example.voip.ui.MainActivity
-import com.example.voip.utils.NsdHelper
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.net.SocketAddress
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 class VoipService : LifecycleService() {
@@ -31,16 +25,13 @@ class VoipService : LifecycleService() {
     private lateinit var wifiLock: WifiManager.WifiLock
     private lateinit var wakeLock: PowerManager.WakeLock
 
-    private var networkManager: NetworkManager? = null
+    private var networkManager: NetworkManager = NetworkManager()
     private var audioCapture: AudioCapture? = null
     private var audioPlayback: AudioPlayback? = null
 
-    // State flows
-    private val _isServerRunning = MutableStateFlow(false)
-    val isServerRunning: StateFlow<Boolean> = _isServerRunning.asStateFlow()
-
-    private val _connectedClients = MutableStateFlow<List<ClientInfo>>(emptyList())
-    val connectedClients: StateFlow<List<ClientInfo>> = _connectedClients.asStateFlow()
+    // Estados para a UI observar
+    private val _isConnected = MutableStateFlow(false)
+    val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
     private val _audioLevel = MutableStateFlow(0f)
     val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
@@ -48,12 +39,8 @@ class VoipService : LifecycleService() {
     private val _microphoneMuted = MutableStateFlow(false)
     val microphoneMuted: StateFlow<Boolean> = _microphoneMuted.asStateFlow()
 
-    private var serverJob: Job? = null
-    private var clientJob: Job? = null
+    private var connectionJob: Job? = null
     private val isShuttingDown = AtomicBoolean(false)
-
-    // For server: map of clientId -> UDP address
-    private val clientAddresses = ConcurrentHashMap<String, SocketAddress>()
 
     inner class LocalBinder : Binder() {
         fun getService(): VoipService = this@VoipService
@@ -61,7 +48,7 @@ class VoipService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
-        // Acquire locks to prevent sleep and Wi-Fi throttling
+        // Mantém o celular acordado e o Wi-Fi em alta performance
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Voip::WakeLock")
         wakeLock.acquire()
@@ -76,104 +63,46 @@ class VoipService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
 
-        val mode = intent?.getStringExtra("MODE") ?: return START_NOT_STICKY
-        when (mode) {
-            "SERVER" -> startServer()
-            "CLIENT" -> {
-                val serverIp = intent.getStringExtra("SERVER_IP") ?: return START_NOT_STICKY
-                startClient(serverIp)
-            }
-        }
+        val serverIp = intent?.getStringExtra("SERVER_IP") ?: "127.0.0.1"
+        val roomId = intent?.getStringExtra("ROOM_ID") ?: "SALA01"
+
+        startVoip(serverIp, roomId)
 
         startForeground(NOTIFICATION_ID, createNotification())
         return START_STICKY
     }
 
-    private fun startServer() {
-        if (_isServerRunning.value) return
-        _isServerRunning.value = true
+    private fun startVoip(serverIp: String, roomId: String) {
+        if (_isConnected.value) return
+        
+        connectionJob = lifecycleScope.launch(Dispatchers.IO) {
+            // Configura o NetworkManager para o modo Relay
+            networkManager.serverIp = serverIp
+            networkManager.roomId = roomId
+            networkManager.start()
+            
+            _isConnected.value = true
 
-        serverJob = lifecycleScope.launch(Dispatchers.IO) {
-            // Start network manager in server mode
-            networkManager = NetworkManager.createServer(
-                context = this@VoipService,
-                onClientConnected = { clientId, address ->
-                    clientAddresses[clientId] = address
-                    updateClientList()
-                },
-                onClientDisconnected = { clientId ->
-                    clientAddresses.remove(clientId)
-                    updateClientList()
-                }
-            )
-            networkManager?.startServer()
-
-            // Register this server via NSD
-            val udpPort = networkManager?.udpPort ?: 0
-            NsdHelper.getInstance()?.registerService(
-                serviceName = "VoipServer-${android.os.Build.MODEL}",
-                serviceType = "_voip._udp",
-                port = udpPort
-            ) { success ->
-                if (success) {
-                    // Notify UI if needed
-                }
-            }
-
-            // Start audio capture (mute status checked inside)
+            // Configura a Captura de Áudio (Microfone)
             audioCapture = AudioCapture(
                 onAudioData = { audioData ->
                     if (!_microphoneMuted.value) {
-                        networkManager?.sendAudioToAll(audioData)
+                        networkManager.sendAudioFrame(audioData)
                     }
                 },
                 onAudioLevel = { level -> _audioLevel.value = level }
             )
             audioCapture?.start()
 
-            // Start audio playback with jitter buffer
+            // Configura a Reprodução (Alto-falante)
             audioPlayback = AudioPlayback()
             audioPlayback?.start()
 
-            // Handle incoming audio from network
-            networkManager?.setOnAudioReceived { audioData ->
+            // Quando chegar áudio do servidor, toca no alto-falante
+            networkManager.onAudioReceived = { audioData ->
                 audioPlayback?.playAudio(audioData)
             }
         }
-    }
-
-    private fun startClient(serverIp: String) {
-        clientJob = lifecycleScope.launch(Dispatchers.IO) {
-            networkManager = NetworkManager.createClient(
-                context = this@VoipService,
-                serverIp = serverIp,
-                onClientConnected = { _, _ -> },
-                onClientDisconnected = { _ -> }
-            )
-            networkManager?.connectToServer()
-
-            audioCapture = AudioCapture(
-                onAudioData = { audioData ->
-                    if (!_microphoneMuted.value) {
-                        networkManager?.sendAudio(audioData)
-                    }
-                },
-                onAudioLevel = { level -> _audioLevel.value = level }
-            )
-            audioCapture?.start()
-
-            audioPlayback = AudioPlayback()
-            audioPlayback?.start()
-
-            networkManager?.setOnAudioReceived { audioData ->
-                audioPlayback?.playAudio(audioData)
-            }
-        }
-    }
-
-    private fun updateClientList() {
-        val clients = clientAddresses.keys.map { ClientInfo(it) }
-        _connectedClients.value = clients
     }
 
     fun toggleMicrophone() {
@@ -184,50 +113,44 @@ class VoipService : LifecycleService() {
         isShuttingDown.set(true)
         audioCapture?.stop()
         audioPlayback?.stop()
-        networkManager?.stop()
-        serverJob?.cancel()
-        clientJob?.cancel()
-        NsdHelper.getInstance()?.unregisterService()
-        wifiLock.release()
-        wakeLock.release()
+        networkManager.stop()
+        connectionJob?.cancel()
+        
+        if (wakeLock.isHeld) wakeLock.release()
+        if (wifiLock.isHeld) wifiLock.release()
         super.onDestroy()
     }
 
-    override fun onBind(intent: Intent): IBinder = binder
+    override fun onBind(intent: Intent): IBinder {
+        super.onBind(intent)
+        return binder
+    }
+
+    // --- Notificações e Canais (Obrigatório para rodar em background) ---
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Voice Chat Service",
+                "GameSpeak Voice",
                 NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Voice chat service is running"
-            }
+            )
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
     }
 
     private fun createNotification(): Notification {
-        val stopIntent = Intent(this, VoipService::class.java).apply {
-            action = "STOP_SERVICE"
-        }
-        val stopPendingIntent = PendingIntent.getService(
-            this, 0, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
         val openIntent = Intent(this, MainActivity::class.java)
         val openPendingIntent = PendingIntent.getActivity(
             this, 0, openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Voice Chat")
-            .setContentText(if (_isServerRunning.value) "Server is running" else "Connected to server")
-            .setSmallIcon(R.drawable.ic_mic)
+            .setContentTitle("GameSpeak Ativo")
+            .setContentText("Conectado na sala ${networkManager.roomId}")
+            .setSmallIcon(android.R.drawable.presence_audio_online) // Ícone padrão do Android
             .setContentIntent(openPendingIntent)
-            .addAction(R.drawable.ic_stop, "Stop", stopPendingIntent)
             .setOngoing(true)
             .build()
     }
@@ -237,5 +160,3 @@ class VoipService : LifecycleService() {
         private const val CHANNEL_ID = "voip_service_channel"
     }
 }
-
-data class ClientInfo(val name: String)

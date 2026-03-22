@@ -1,53 +1,52 @@
 package com.example.voip.ui
 
-import androidx.compose.foundation.background
 import android.Manifest
-import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.voip.ui.components.AudioLevelIndicator
-import com.example.voip.ui.components.ConnectDialog
-import com.example.voip.ui.components.UserList
-import com.example.voip.utils.NsdHelper
+import com.example.voip.network.NetworkManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    // Instância do NetworkManager (Certifique-se que o arquivo NetworkManager.kt existe)
+    private val networkManager = NetworkManager()
+
     private val requestPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
         if (permissions.values.all { it }) {
-            // Permissions granted
+            // Permissões concedidas
         } else {
-            // Show rationale
+            Toast.makeText(this, "Permissões necessárias para o VoIP funcionar", Toast.LENGTH_LONG).show()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
         requestPermissions.launch(
             arrayOf(
                 Manifest.permission.RECORD_AUDIO,
                 Manifest.permission.INTERNET,
-                Manifest.permission.ACCESS_NETWORK_STATE,
-                Manifest.permission.ACCESS_WIFI_STATE,
-                Manifest.permission.POST_NOTIFICATIONS
+                Manifest.permission.ACCESS_NETWORK_STATE
             )
         )
 
         setContent {
             MaterialTheme {
-                VoipApp()
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    VoipScreen(networkManager)
+                }
             }
         }
     }
@@ -56,9 +55,11 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoipScreen(networkManager: NetworkManager) {
-    // Estados para guardar o que o usuário digita
-    var ipAddress by remember { mutableStateOf("192.168.0.100") }
+    // Estados da UI
+    var ipAddress by remember { mutableStateOf("127.0.0.1") }
+    var roomId by remember { mutableStateOf("SALA01") }
     var statusText by remember { mutableStateOf("Desconectado") }
+    
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -70,35 +71,45 @@ fun VoipScreen(networkManager: NetworkManager) {
         verticalArrangement = Arrangement.Center
     ) {
         Text(text = "GameSpeak VoIP", style = MaterialTheme.typography.headlineMedium)
+        Text(text = "Modo: Relay (Termux)", style = MaterialTheme.typography.bodySmall)
         
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // Campo para digitar o IP
+        // Campo para o IP (localhost se for o dono do Termux, ou IP do amigo)
         OutlinedTextField(
             value = ipAddress,
             onValueChange = { ipAddress = it },
-            label = { Text("IP do Servidor") },
+            label = { Text("IP do Servidor (Termux)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Campo para o ID da Sala
+        OutlinedTextField(
+            value = roomId,
+            onValueChange = { roomId = it },
+            label = { Text("ID da Sala") },
             modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Botões de Ação
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            Button(onClick = {
-                statusText = "Iniciando Servidor..."
-                networkManager.startServer()
-                statusText = "Servidor Rodando na porta ${networkManager.udpPort}"
-            }) {
-                Text("Criar Sala (Host)")
-            }
-
-            Button(onClick = {
+        // Botão de Conectar
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
                 scope.launch(Dispatchers.IO) {
                     try {
-                        statusText = "Conectando..."
-                        networkManager.connectToServer() // Usa o ipAddress que você digitou
-                        statusText = "Conectado ao Servidor!"
+                        withContext(Dispatchers.Main) { statusText = "Conectando..." }
+                        
+                        networkManager.serverIp = ipAddress
+                        networkManager.roomId = roomId
+                        networkManager.start()
+                        
+                        withContext(Dispatchers.Main) { 
+                            statusText = "Conectado à sala: $roomId"
+                        }
                     } catch (e: Exception) {
                         withContext(Dispatchers.Main) {
                             statusText = "Erro: ${e.localizedMessage}"
@@ -106,14 +117,14 @@ fun VoipScreen(networkManager: NetworkManager) {
                         }
                     }
                 }
-            }) {
-                Text("Entrar")
             }
+        ) {
+            Text("Entrar na Chamada")
         }
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // Status e Logs
+        // Card de Status
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -127,11 +138,16 @@ fun VoipScreen(networkManager: NetworkManager) {
         
         Spacer(modifier = Modifier.height(16.dp))
         
+        // Botão Desconectar
         Button(
-            onClick = { networkManager.stop(); statusText = "Parado" },
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+            onClick = { 
+                networkManager.stop()
+                statusText = "Desconectado" 
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Parar Tudo", color = Color.White)
+            Text("Sair da Sala", color = Color.White)
         }
     }
 }

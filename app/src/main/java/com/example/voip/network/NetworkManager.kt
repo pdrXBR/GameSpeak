@@ -6,18 +6,21 @@ import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.client.request.url
-import io.ktor.http.HttpMethod
+import io.ktor.http.cio.websocket.Frame
+import io.ktor.http.cio.websocket.readText
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
-import io.ktor.websocket.*
+import io.ktor.websocket.DefaultWebSocketServerSession
+import io.ktor.websocket.send
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.consumeAsFlow
+import kotlinx.coroutines.flow.firstOrNull
 import java.net.DatagramPacket
 import java.net.DatagramSocket
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -37,7 +40,7 @@ class NetworkManager private constructor(
 
     private var webSocketServer: io.ktor.server.engine.ApplicationEngine? = null
     private var webSocketClient: HttpClient? = null
-    private var clientSession: DefaultClientWebSocketSession? = null
+    private var clientSession: io.ktor.client.plugins.websocket.DefaultClientWebSocketSession? = null
 
     // For server: map of clientId -> UDP address
     private val clients = ConcurrentHashMap<String, InetSocketAddress>()
@@ -64,10 +67,10 @@ class NetworkManager private constructor(
 
         // Start WebSocket server on port 8080
         webSocketServer = embeddedServer(Netty, port = 8080) {
-            install(WebSockets)
+            install(WebSockets) // no config needed
             routing {
-                webSocket("/signal") {
-                    handleWebSocketConnection(this)
+                webSocket("/signal") { session ->
+                    handleWebSocketConnection(session)
                 }
             }
         }.start(wait = false)
@@ -118,9 +121,9 @@ class NetworkManager private constructor(
         clientSession?.send(Frame.Text("$udpPort"))
 
         // Wait for the server to respond with its UDP port
-        val serverUdpPort = clientSession?.incoming?.consumeAsFlow()?.firstOrNull()?.let {
-            if (it is Frame.Text) {
-                val msg = it.readText()
+        val serverUdpPort = clientSession?.incoming?.consumeAsFlow()?.firstOrNull()?.let { frame ->
+            if (frame is Frame.Text) {
+                val msg = frame.readText()
                 if (msg.startsWith("UDP_PORT:")) {
                     msg.substringAfter(":").toIntOrNull()
                 } else null
